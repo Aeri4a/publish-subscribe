@@ -1,0 +1,6 @@
+# IGNORE ALL
+*
+
+# EXCEPT
+!.gitignore
+!main.c
