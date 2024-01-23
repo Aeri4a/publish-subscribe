@@ -29,7 +29,7 @@ typedef struct {
     Message *head;
 } TQueue;
 
-void createQueue(TQueue *queue, int size) {
+void createQueueI(TQueue *queue, int size) {
     queue->head = NULL;
     queue->tail = NULL;
     queue->msgMax = size;
@@ -43,7 +43,7 @@ void createQueue(TQueue *queue, int size) {
     }
 }
 
-void destroyQueue(TQueue *queue) {
+void destroyQueueI(TQueue *queue) {
     Message *tmp = queue->head;
 
     // Clear all Messages structures
@@ -58,7 +58,7 @@ void destroyQueue(TQueue *queue) {
 }
 
 // TODO: Change thread type of pthread_t
-bool subscribe(TQueue *queue, int thread) {
+bool subscribeI(TQueue *queue, int thread) {
     queue->subscribersNumber += 1;
     for (int i = 0; i < MAX_SUBS; i++) {
         if (queue->subscribers[i].threadId == -1) {
@@ -70,7 +70,7 @@ bool subscribe(TQueue *queue, int thread) {
 }
 
 // TODO: Change thread type of pthread_t
-void unsubscribe(TQueue *queue, int thread) {
+void unsubscribeI(TQueue *queue, int thread) {
     Message *threadNextMsg;
 
     queue->subscribersNumber -= 1;
@@ -106,13 +106,16 @@ void unsubscribe(TQueue *queue, int thread) {
     }
 }
 
-void put(TQueue *queue, void *msg) {
+void putI(TQueue *queue, void *msg) {
     // Check if there is needed space in queue
     if (queue->msgNumber == queue->msgMax) {
         // Search for messages which can be deleted
         int deletedCount = 0;
         Message *tmp = queue->head;
         while (tmp->receivers == 0) {
+            if (queue->head == queue->tail) {
+                queue->tail = NULL;
+            }
             queue->head = tmp->next;
             free(tmp);
             deletedCount += 1;
@@ -155,7 +158,7 @@ void put(TQueue *queue, void *msg) {
 }
 
 // TODO: Change thread type of pthread_t
-void *get(TQueue *queue, int thread) {
+void *getI(TQueue *queue, int thread) {
     int threadSubId;
 
     // TODO: Change it for something faster like hashmap
@@ -186,7 +189,7 @@ void *get(TQueue *queue, int thread) {
 }
 
 // TODO: Change thread type of pthread_t
-int getAvailable(TQueue *queue, int thread) {
+int getAvailableI(TQueue *queue, int thread) {
     Message *nextThreadMsg;
 
     // TODO: Change it for something faster like hashmap
@@ -206,6 +209,69 @@ int getAvailable(TQueue *queue, int thread) {
 
     return unreadMessages;
 }
+
+void removeI(TQueue *queue, void *msg) {
+    // Look for message position in queue
+    // Check if its (1) only one message in queue, (2) head, (3) tail or (4) between them
+
+    Message *messageToRemove;
+    Message *nextMessage;
+    // (1)
+    if (queue->head->msg == msg && queue->head == queue->tail) {
+        messageToRemove = queue->head;
+        nextMessage = NULL;
+
+        queue->head = NULL;
+        queue->tail = NULL;
+    }
+    // (2)
+    else if (queue->head->msg == msg) {
+        messageToRemove = queue->head;
+
+        // Detach head
+        queue->head = queue->head->next;
+        nextMessage = queue->head;
+    }
+    // (3)
+    else if (queue->tail->msg == msg) {
+        messageToRemove = queue->tail;
+        nextMessage = NULL;
+
+        // Find predecessor of tail
+        Message *tmp = queue->head;
+        while (tmp->next != queue->tail) {
+            tmp = tmp->next;
+        }
+
+        // Change tail
+        tmp->next = NULL;
+        queue->tail = tmp;
+    }
+    // (4)
+    else {
+        // Find in between
+        Message *tmp = queue->head;
+        while (tmp->next->msg != msg) {
+            tmp = tmp->next;
+        }
+
+        messageToRemove = tmp->next;
+        tmp->next = messageToRemove->next;
+        nextMessage = tmp->next;
+    }
+
+    // Update subscribers next message which points to removed message
+    for (int i = 0; i < MAX_SUBS; i++) {
+        if (queue->subscribers[i].nextMsg == messageToRemove)
+            queue->subscribers[i].nextMsg = nextMessage;
+    }
+
+    // Delete message
+    free(messageToRemove);
+}
+
+// TODO: Complete function
+void setSizeI(TQueue *queue, int size);
 
 // bool enqueue(TQueue *q, int num) {
 //     Message *newNode = malloc(sizeof(Message));
@@ -244,29 +310,23 @@ int main() {
     int threadId1 = 5;
     int threadId2 = 6;
     TQueue *q = malloc(sizeof(TQueue));
-    createQueue(q, 3);
+    createQueueI(q, 3);
 
-    subscribe(q, threadId1);
+    subscribeI(q, threadId1);
     char msg1[] = "Message 1";
-    put(q, msg1);
-    subscribe(q, threadId2);
+    putI(q, msg1);
+    subscribeI(q, threadId2);
     char msg2[] = "Message 2";
-    put(q, msg2);
+    putI(q, msg2);
     char msg3[] = "Message 3";
-    put(q, msg3);
+    putI(q, msg3);
 
-    printf("First message info: %d\n", q->head->receivers);
-    printf("Second message info: %d\n", q->head->next->receivers);
+    getI(q, threadId1);
+    removeI(q, msg2);
+    removeI(q, msg3);
+    printf("Next msg for thread1: %s", (char*)getI(q, threadId1));
 
-    printf("Available messages: %d\n", getAvailable(q, threadId1));
-    printf("Getting message: %s\n", (char*)get(q, threadId1));
-    printf("Available messages: %d\n", getAvailable(q, threadId1));
-
-    put(q, "Hello world!");
-
-    printf("Msg num: %d\n", q->msgNumber);
-
-    destroyQueue(q);
+    destroyQueueI(q);
 
     return 0;
 }
