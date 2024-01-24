@@ -4,3 +4,4 @@
 # EXCEPT
 !.gitignore
 !main.c
+!main_sync.c
