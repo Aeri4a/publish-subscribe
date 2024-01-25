@@ -3,7 +3,7 @@
 #include <stdbool.h>
 #include <limits.h>
 #include <string.h>
-// #include <pthread.h>
+#include <pthread.h>
 
 #define QUEUE_EMPTY INT_MIN
 #define MAX_SUBS 50
@@ -15,7 +15,7 @@ typedef struct Message {
 } Message;
 
 typedef struct {
-    int threadId;
+    pthread_t threadId;
     Message *nextMsg;
 } Subscriber;
 
@@ -57,8 +57,7 @@ void destroyQueueI(TQueue *queue) {
     free(queue);
 }
 
-// TODO: Change thread type of pthread_t
-bool subscribeI(TQueue *queue, int thread) {
+bool subscribeI(TQueue *queue, pthread_t thread) {
     queue->subscribersNumber += 1;
     for (int i = 0; i < MAX_SUBS; i++) {
         if (queue->subscribers[i].threadId == -1) {
@@ -69,8 +68,7 @@ bool subscribeI(TQueue *queue, int thread) {
     return false;
 }
 
-// TODO: Change thread type of pthread_t
-void unsubscribeI(TQueue *queue, int thread) {
+void unsubscribeI(TQueue *queue, pthread_t thread) {
     Message *threadNextMsg;
 
     queue->subscribersNumber -= 1;
@@ -157,8 +155,7 @@ void putI(TQueue *queue, void *msg) {
     }
 }
 
-// TODO: Change thread type of pthread_t
-void *getI(TQueue *queue, int thread) {
+void *getI(TQueue *queue, pthread_t thread) {
     int threadSubId;
 
     // TODO: Change it for something faster like hashmap
@@ -188,8 +185,7 @@ void *getI(TQueue *queue, int thread) {
     }
 }
 
-// TODO: Change thread type of pthread_t
-int getAvailableI(TQueue *queue, int thread) {
+int getAvailableI(TQueue *queue, pthread_t thread) {
     Message *nextThreadMsg;
 
     // TODO: Change it for something faster like hashmap
