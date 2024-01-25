@@ -58,10 +58,10 @@ void destroyQueueI(TQueue *queue) {
 }
 
 bool subscribeI(TQueue *queue, pthread_t thread) {
-    queue->subscribersNumber += 1;
     for (int i = 0; i < MAX_SUBS; i++) {
         if (queue->subscribers[i].threadId == -1) {
             queue->subscribers[i].threadId = thread;
+            queue->subscribersNumber += 1;
             return true;
         }
     }
@@ -71,10 +71,11 @@ bool subscribeI(TQueue *queue, pthread_t thread) {
 void unsubscribeI(TQueue *queue, pthread_t thread) {
     Message *threadNextMsg;
 
-    queue->subscribersNumber -= 1;
     // TODO: Change it for something faster like hashmap
     for (int i = 0; i< MAX_SUBS; i++) {
         if (queue->subscribers[i].threadId == thread) {
+            queue->subscribersNumber -= 1;
+
             // Get its last message
             threadNextMsg = queue->subscribers[i].nextMsg;
 
@@ -107,23 +108,7 @@ void unsubscribeI(TQueue *queue, pthread_t thread) {
 void putI(TQueue *queue, void *msg) {
     // Check if there is needed space in queue
     if (queue->msgNumber == queue->msgMax) {
-        // Search for messages which can be deleted
-        int deletedCount = 0;
-        Message *tmp = queue->head;
-        while (tmp->receivers == 0) {
-            if (queue->head == queue->tail) {
-                queue->tail = NULL;
-            }
-            queue->head = tmp->next;
-            free(tmp);
-            deletedCount += 1;
-            tmp = queue->head;
-        }
-
-        // No free space for new msg, waiting there -> check if thread read sth
-        if (deletedCount == 0) return;
-        // There is some space
-        else queue->msgNumber -= deletedCount;
+        // Wait for readers
     }
 
     // Create new Message
@@ -156,10 +141,10 @@ void putI(TQueue *queue, void *msg) {
 }
 
 void *getI(TQueue *queue, pthread_t thread) {
-    int threadSubId;
 
     // TODO: Change it for something faster like hashmap
     // Find threadId in subscribers list
+    int threadSubId;
     for (int i = 0; i < MAX_SUBS; i++) {
         if (queue->subscribers[i].threadId == thread)
             threadSubId = i;
@@ -171,15 +156,27 @@ void *getI(TQueue *queue, pthread_t thread) {
     
     if (nextThreadMsg == NULL) {
         // WAIT
+        nextThreadMsg = queue->subscribers[threadSubId].nextMsg;
     }
 
     // Get newest message by pointer
+    void *msg;
     Message *tmp = queue->head;
     while (tmp != NULL) {
         if (tmp == nextThreadMsg) {
+            // Save next message
+             queue->subscribers[threadSubId].nextMsg = tmp->next;
+             // Save message
+             msg = tmp->msg;
              tmp->receivers -= 1;
-             queue->subscribers[threadSubId].nextMsg = tmp->next; // save next message
-             return tmp->msg;
+
+             // If its last read of message - delete it
+             if (tmp->receivers == 0) {
+                queue->msgNumber -= 1;
+                queue->head = tmp->next;
+                free(tmp);
+             }
+             return msg;
         }
         tmp = tmp->next;
     }
