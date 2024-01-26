@@ -103,6 +103,7 @@ void unsubscribeI(TQueue *queue, pthread_t thread) {
             break;
         }
     }
+
     // If thread has unread messages then
     if (threadNextMsg != NULL) {
         // Traverse and decrement msg receivers number starting from newest unread
@@ -173,7 +174,6 @@ void putI(TQueue *queue, void *msg) {
     queue->msgNumber++;
     if (queue->tail != NULL) {
         queue->tail->next = newMessage;
-        printf("Not here\n");
     }
 
     queue->tail = newMessage;
@@ -382,8 +382,6 @@ void *subscriber(void *q) {
         }
         // sleep(1);
     }
-
-    pthread_exit();
 }
 
 void *publisher(void *q) {
