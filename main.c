@@ -174,7 +174,7 @@ void *getI(TQueue *queue, pthread_t thread) {
              if (tmp->receivers == 0) {
                 queue->msgNumber -= 1;
                 queue->head = tmp->next;
-                free(tmp);
+                // free(tmp);
              }
              return msg;
         }
