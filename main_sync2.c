@@ -77,6 +77,7 @@ bool subscribeI(TQueue *queue, pthread_t thread) {
             queue->subscribers[i].threadId = thread;
             queue->subscribersNumber += 1;
             pthread_mutex_unlock(&queue->mutex);
+            pthread_cond_broadcast(&queue->msgPutCall);
             printf("[S] - Thread subscribed to queue\n");
             return true;
         }
@@ -136,6 +137,7 @@ void unsubscribeI(TQueue *queue, pthread_t thread) {
         }
     }
 
+    pthread_cond_broadcast(&queue->msgPutCall);
     pthread_mutex_unlock(&queue->mutex);
 }
 
@@ -186,10 +188,8 @@ void putI(TQueue *queue, void *msg) {
         if (
             queue->subscribers[i].threadId != -1 &&
             queue->subscribers[i].nextMsg == NULL
-        ) {
-            printf("One time here\n");
+        )
             queue->subscribers[i].nextMsg = newMessage;
-        }
     }
 
     printf("[P] - Added new message\n");
@@ -247,11 +247,12 @@ void *getI(TQueue *queue, pthread_t thread) {
              if (tmp->receivers == 0) {
                 printf("[S] - Message was read by the last subscriber | Deleting message\n");
                 queue->msgNumber -= 1;
+
                 if (queue->head == queue->tail) {
                     queue->tail = tmp->next;
                 }
                 queue->head = tmp->next;
-                tmp->msg = NULL;
+                // tmp->msg = NULL;
                 free(tmp);
              }
              pthread_mutex_unlock(&queue->mutex);
@@ -298,6 +299,7 @@ int getAvailableI(TQueue *queue, pthread_t thread) {
 
 void removeI(TQueue *queue, void *msg) {
     pthread_mutex_lock(&queue->mutex);
+
     // Look for message position in queue
     // Check if its (1) only one message in queue, (2) head, (3) tail or (4) between them
 
@@ -338,13 +340,26 @@ void removeI(TQueue *queue, void *msg) {
     else {
         // Find in between
         Message *tmp = queue->head;
-        while (tmp->next->msg != msg) {
+        Message *previous;
+        while (tmp != NULL) {
+            if (tmp->msg == msg) {
+                break;
+            }
+
+            previous = tmp;
             tmp = tmp->next;
         }
 
-        messageToRemove = tmp->next;
-        tmp->next = messageToRemove->next;
-        nextMessage = tmp->next;
+        // If not found
+        if (tmp == NULL) {
+            pthread_mutex_unlock(&queue->mutex);
+            printf("[R] - Message for remove not found\n");
+            return;
+        }
+
+        messageToRemove = tmp;
+        nextMessage = messageToRemove->next;
+        previous->next = nextMessage;
     }
 
     // Update subscribers next message which points to removed message
@@ -353,9 +368,13 @@ void removeI(TQueue *queue, void *msg) {
             queue->subscribers[i].nextMsg = nextMessage;
     }
 
+    // Decrement queue message counter
+    queue->msgNumber -= 1;
+
     // Delete message
     free(messageToRemove);
     pthread_mutex_unlock(&queue->mutex);
+    printf("[R] - Removed message\n");
 }
 
 // TODO: Complete function
@@ -366,19 +385,18 @@ void *subscriber(void *q) {
     pthread_t thread = ((pthread_t)pthread_self());
     subscribeI(queue, thread);
     int available;
-    char *newMsg;
+    int *newMsg;
 
-    printf("Hello\n");
     while (true) {
         available = getAvailableI(queue, thread);
         printf("[S] - Available messages for thread: %d\n", available);
-        // newMsg = (char*)getI(queue, thread);
+
         newMsg = getI(queue, thread);
         if (newMsg == NULL) {
             printf("[S] - Thread is not subscribed\n");
             break;
         } else {
-            printf("[S] - New message received: %s\n", newMsg);
+            printf("[S] - New message received: %d\n", *newMsg);
         }
         // sleep(1);
     }
@@ -386,21 +404,37 @@ void *subscriber(void *q) {
 
 void *publisher(void *q) {
     TQueue *queue = (TQueue*)q;
-    pthread_t thread = ((pthread_t)pthread_self());
-    char *yes[10] = { "Msg1", "Msg2", "Msg3", "Msg4", "Msg5", "Msg6", "Msg7", "Msg8", "Msg9", "Msg10" };
+    // pthread_t thread = ((pthread_t)pthread_self());
     int i = 0;
     while (true) {
         if (i==9) i=0;
         else i++;
 
-        putI(queue, yes[i]);
+        putI(queue, &i);
         // sleep(1);
-    }   
+    }
+}
+
+void *remover(void *q) {
+    TQueue *queue = (TQueue*)q;
+    // pthread_t thread = ((pthread_t)pthread_self());
+    int i = 0;
+    while (true) {
+        if (i==9) i=0;
+        else i++;
+
+        putI(queue, &i);
+        // sleep(1);
+
+        if (i == 4 || i == 7)
+            removeI(queue, &i);
+    }
 }
 
 int main() {
     pthread_t pub1, pub2, pub3;
     pthread_t sub1, sub2, sub3, sub4, sub5, sub6;
+    pthread_t rem1;
 
     TQueue *queue = malloc(sizeof(TQueue));
     createQueueI(queue, 5);
@@ -414,16 +448,21 @@ int main() {
     // pthread_create(&sub4, NULL, subscriber, queue);
     // pthread_create(&sub5, NULL, subscriber, queue);
     // pthread_create(&sub6, NULL, subscriber, queue);
+    pthread_create(&rem1, NULL, remover, queue);
     
-    sleep(2);
-    unsubscribeI(queue, sub1);
-    sleep(2);
-    unsubscribeI(queue, sub2);
-    sleep(2);
-    unsubscribeI(queue, sub3);
 
-    sleep(5);
-    pthread_create(&sub4, NULL, subscriber, queue);
+    // # Testing unsubscribing
+    // sleep(2);
+    // unsubscribeI(queue, sub1);
+    // sleep(2);
+    // unsubscribeI(queue, sub2);
+    // sleep(2);
+    // unsubscribeI(queue, sub3);
+
+    // sleep(5);
+    // pthread_create(&sub4, NULL, subscriber, queue);
+
+
     // destroyQueueI(queue);
 
     pthread_join(pub1, NULL);
@@ -435,6 +474,7 @@ int main() {
     pthread_join(sub4, NULL);
     // pthread_join(sub5, NULL);
     // pthread_join(sub6, NULL);
+    pthread_join(rem1, NULL);
 
     return 0;
 }
