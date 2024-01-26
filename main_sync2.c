@@ -22,8 +22,8 @@ typedef struct {
 
 typedef struct {
     pthread_mutex_t mutex;
-    pthread_cond_t cond;
-    pthread_cond_t msgRemoved;
+    pthread_cond_t msgNew;
+    pthread_cond_t msgRemove;
 
     int msgMax;
     int msgNumber;
@@ -36,8 +36,8 @@ typedef struct {
 
 void createQueueI(TQueue *queue, int size) {
     pthread_mutex_init(&queue->mutex, NULL);
-    pthread_cond_init(&queue->cond, NULL);
-    pthread_cond_init(&queue->msgRemoved, NULL);
+    pthread_cond_init(&queue->msgNew, NULL);
+    pthread_cond_init(&queue->msgRemove, NULL);
 
     queue->head = NULL;
     queue->tail = NULL;
@@ -65,6 +65,7 @@ void destroyQueueI(TQueue *queue) {
 
     pthread_mutex_unlock(&queue->mutex);
     pthread_mutex_destroy(&queue->mutex);
+
     // Clear rest of the TQueue structure
     free(queue);
 }
@@ -88,6 +89,7 @@ bool subscribeI(TQueue *queue, pthread_t thread) {
 }
 
 void unsubscribeI(TQueue *queue, pthread_t thread) {
+    pthread_mutex_lock(&queue->mutex);
     Message *threadNextMsg;
 
     // TODO: Change it for something faster like hashmap
@@ -122,6 +124,8 @@ void unsubscribeI(TQueue *queue, pthread_t thread) {
             tmp = tmp->next;
         }
     }
+
+    pthread_mutex_unlock(&queue->mutex);
 }
 
 void putI(TQueue *queue, void *msg) {
@@ -130,14 +134,14 @@ void putI(TQueue *queue, void *msg) {
     // Check if there is needed space in queue
     while (queue->msgNumber == queue->msgMax) {
         printf("Waiting\n");
-        pthread_cond_wait(&queue->msgRemoved, &queue->mutex);
+        pthread_cond_wait(&queue->msgRemove, &queue->mutex);
     }
 
     // Create new Message
     Message *newMessage = malloc(sizeof(Message));
     if (newMessage == NULL) {
         pthread_mutex_unlock(&queue->mutex);
-        pthread_cond_broadcast(&queue->cond);
+        pthread_cond_broadcast(&queue->msgNew);
         return;
     }
 
@@ -145,7 +149,7 @@ void putI(TQueue *queue, void *msg) {
         printf("No subs\n");
         free(newMessage);
         pthread_mutex_unlock(&queue->mutex);
-        pthread_cond_broadcast(&queue->cond);
+        pthread_cond_broadcast(&queue->msgNew);
         return;
     }
 
@@ -174,7 +178,7 @@ void putI(TQueue *queue, void *msg) {
     }
     printf("Inserted message\n");
     pthread_mutex_unlock(&queue->mutex);
-    pthread_cond_broadcast(&queue->cond);
+    pthread_cond_broadcast(&queue->msgNew);
 }
 
 void *getI(TQueue *queue, pthread_t thread) {
@@ -194,7 +198,8 @@ void *getI(TQueue *queue, pthread_t thread) {
     Message *nextThreadMsg = queue->subscribers[threadSubId].nextMsg;
     
     while (nextThreadMsg == NULL) {
-        pthread_cond_wait(&queue->cond, &queue->mutex);
+        pthread_cond_wait(&queue->msgNew, &queue->mutex);
+        printf("Seems to be new msg\n");
         nextThreadMsg = queue->subscribers[threadSubId].nextMsg;
     }
     printf("Getting message...\n");
@@ -213,21 +218,25 @@ void *getI(TQueue *queue, pthread_t thread) {
              if (tmp->receivers == 0) {
                 printf("Deleted message\n");
                 queue->msgNumber -= 1;
+                if (queue->head == queue->tail) {
+                    queue->tail = tmp->next;
+                }
                 queue->head = tmp->next;
                 tmp->msg = NULL;
                 free(tmp);
              }
              pthread_mutex_unlock(&queue->mutex);
-             pthread_cond_broadcast(&queue->msgRemoved);
+             pthread_cond_broadcast(&queue->msgRemove);
              return msg;
         }
         tmp = tmp->next;
     }
     pthread_mutex_unlock(&queue->mutex);
-    pthread_cond_broadcast(&queue->cond);
+    pthread_cond_broadcast(&queue->msgRemove);
 }
 
 int getAvailableI(TQueue *queue, pthread_t thread) {
+    pthread_mutex_lock(&queue->mutex);
     Message *nextThreadMsg;
 
     // TODO: Change it for something faster like hashmap
@@ -245,10 +254,14 @@ int getAvailableI(TQueue *queue, pthread_t thread) {
         nextThreadMsg = nextThreadMsg->next;
     }
 
+    pthread_mutex_unlock(&queue->mutex);
+    // pthread_cond_broadcast(&queue->msgNew);
+    // pthread_cond_broadcast(&queue->msgRemove);
     return unreadMessages;
 }
 
 void removeI(TQueue *queue, void *msg) {
+    pthread_mutex_lock(&queue->mutex);
     // Look for message position in queue
     // Check if its (1) only one message in queue, (2) head, (3) tail or (4) between them
 
@@ -306,42 +319,11 @@ void removeI(TQueue *queue, void *msg) {
 
     // Delete message
     free(messageToRemove);
+    pthread_mutex_unlock(&queue->mutex);
 }
 
 // TODO: Complete function
 void setSizeI(TQueue *queue, int size);
-
-// bool enqueue(TQueue *q, int num) {
-//     Message *newNode = malloc(sizeof(Message));
-//     if (newNode == NULL) return false;
-//     newNode->value = num;
-//     newNode->next = NULL;
-
-//     if (q->tail != NULL) {
-//         q->tail->next = newNode;
-//     }
-
-//     q->tail = newNode;
-//     if (q->head == NULL) {
-//         q->head = newNode;
-//     }
-
-//     return true;
-// }
-
-// int dequeue(TQueue *q) {
-//     if (q->head == NULL) return QUEUE_EMPTY;
-//     Message *tmpHead = q->head;    
-//     int result = tmpHead->value;
-
-//     q->head = q->head->next;
-//     if (q->head == NULL) {
-//         q->tail = NULL;
-//     }
-
-//     free(tmpHead);
-//     return result;
-// }
 
 void *subscriber(void *q) {
     TQueue *queue = (TQueue*)q;
@@ -349,7 +331,7 @@ void *subscriber(void *q) {
     subscribeI(queue, thread);
     while (true) {
         printf("[S] - Thread: %ld, got: %s\n", thread, (char*)getI(queue, thread));
-        printf("sub\n");
+        printf("Available: %d\n", getAvailableI(queue, thread));
         // sleep(1);
     }
 }
@@ -362,9 +344,8 @@ void *publisher(void *q) {
     while (true) {
         if (i==9) i=0;
         else i++;
+
         putI(queue, yes[i]);
-        printf("pub\n");
-        // printf("[P] - Thread: %d, added message\n", thread);
         // sleep(1);
     }   
 }
@@ -377,8 +358,8 @@ int main() {
     createQueueI(queue, 5);
 
     pthread_create(&pub1, NULL, publisher, queue);
-    pthread_create(&pub2, NULL, publisher, queue);
-    pthread_create(&pub3, NULL, publisher, queue);
+    // pthread_create(&pub2, NULL, publisher, queue);
+    // pthread_create(&pub3, NULL, publisher, queue);
     pthread_create(&sub1, NULL, subscriber, queue);
     pthread_create(&sub2, NULL, subscriber, queue);
     pthread_create(&sub3, NULL, subscriber, queue);
@@ -390,13 +371,13 @@ int main() {
     // destroyQueueI(queue);
 
     pthread_join(pub1, NULL);
-    pthread_join(sub4, NULL);
+    // pthread_join(pub2, NULL);
+    // pthread_join(pub3, NULL);
     pthread_join(sub1, NULL);
     pthread_join(sub2, NULL);
     pthread_join(sub3, NULL);
-    pthread_join(pub3, NULL);
+    pthread_join(sub4, NULL);
     pthread_join(sub5, NULL);
-    pthread_join(pub2, NULL);
     pthread_join(sub6, NULL);
 
 
