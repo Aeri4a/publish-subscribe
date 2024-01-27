@@ -301,10 +301,17 @@ void removeI(TQueue *queue, void *msg) {
     pthread_mutex_lock(&queue->mutex);
 
     // Look for message position in queue
-    // Check if its (1) only one message in queue, (2) head, (3) tail or (4) between them
+    // Check if its (0) no messages, (1) only one message in queue, (2) head, (3) tail or (4) between them
 
     Message *messageToRemove;
     Message *nextMessage;
+    // (0)
+    if (queue->head == NULL || queue->tail == NULL) {
+        pthread_mutex_unlock(&queue->mutex);
+        printf("[R] - Message for remove not found\n");
+        return;
+    }
+
     // (1)
     if (queue->head->msg == msg && queue->head == queue->tail) {
         messageToRemove = queue->head;
