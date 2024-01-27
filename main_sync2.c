@@ -384,8 +384,37 @@ void removeI(TQueue *queue, void *msg) {
     printf("[R] - Removed message\n");
 }
 
-// TODO: Complete function
-void setSizeI(TQueue *queue, int size);
+void setSizeI(TQueue *queue, int size) {
+    if (size < 1) return;
+    pthread_mutex_lock(&queue->mutex);
+
+    int sizeDifference = 0;
+    if (size > queue->msgMax || size >= queue->msgNumber) {
+        queue->msgMax = size;
+    } else {
+        sizeDifference = queue->msgMax - size;
+
+        // Remove oldest messages
+        Message *tmp = queue->head;
+        for (int i = 0; i < sizeDifference; i++) {
+            // Check which subscriber is pointing on it
+            for (int j = 0 ; j < MAX_SUBS; j++) {
+                if (queue->subscribers[j].nextMsg == tmp) {
+                    queue->subscribers[j].nextMsg = tmp->next;
+                }
+            }
+
+            queue->msgNumber -=1;
+            queue->head = tmp->next;
+            free(tmp);
+            tmp = queue->head;
+        }
+        queue->msgMax = size;
+    }
+
+    printf("[R] - Changed size of queue\n");
+    pthread_mutex_unlock(&queue->mutex);
+}
 
 void *subscriber(void *q) {
     TQueue *queue = (TQueue*)q;
@@ -447,7 +476,7 @@ int main() {
     createQueueI(queue, 5);
 
     pthread_create(&pub1, NULL, publisher, queue);
-    // pthread_create(&pub2, NULL, publisher, queue);
+    pthread_create(&pub2, NULL, publisher, queue);
     // pthread_create(&pub3, NULL, publisher, queue);
     pthread_create(&sub1, NULL, subscriber, queue);
     pthread_create(&sub2, NULL, subscriber, queue);
@@ -455,7 +484,7 @@ int main() {
     // pthread_create(&sub4, NULL, subscriber, queue);
     // pthread_create(&sub5, NULL, subscriber, queue);
     // pthread_create(&sub6, NULL, subscriber, queue);
-    pthread_create(&rem1, NULL, remover, queue);
+    // pthread_create(&rem1, NULL, remover, queue);
     
 
     // # Testing unsubscribing
@@ -469,11 +498,13 @@ int main() {
     // sleep(5);
     // pthread_create(&sub4, NULL, subscriber, queue);
 
-
+    // sleep(3);
+    // setSizeI(queue, 2);
+    
     // destroyQueueI(queue);
 
     pthread_join(pub1, NULL);
-    // pthread_join(pub2, NULL);
+    pthread_join(pub2, NULL);
     // pthread_join(pub3, NULL);
     pthread_join(sub1, NULL);
     pthread_join(sub2, NULL);
@@ -481,7 +512,7 @@ int main() {
     pthread_join(sub4, NULL);
     // pthread_join(sub5, NULL);
     // pthread_join(sub6, NULL);
-    pthread_join(rem1, NULL);
+    // pthread_join(rem1, NULL);
 
     return 0;
 }
