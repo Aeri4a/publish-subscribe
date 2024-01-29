@@ -4,6 +4,7 @@
 # ---- EXCEPT ----
 # Main files
 !.gitignore
+!README.md
 !main.c
 !pubSubInterface.c
 !structures.h
