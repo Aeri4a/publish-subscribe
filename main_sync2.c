@@ -7,7 +7,7 @@
 #include <pthread.h>
 
 // #define QUEUE_EMPTY INT_MIN
-#define MAX_SUBS 50
+#define MAX_SUBS 50 // Max number of subscribers
 
 typedef struct Message {
     int receivers;
@@ -21,18 +21,30 @@ typedef struct {
 } Subscriber;
 
 typedef struct {
+    // Pthread section
     pthread_mutex_t mutex;
     pthread_cond_t msgGetCall;
     pthread_cond_t msgPutCall;
 
+    // Management section
     int msgMax;
     int msgNumber;
+    bool exitFlag;
+    int exitMode; // 0 - no exit, 1 - publishers quit, 2 - subscribers quit
+    int activePublishers;
+    int activeSubscribers;
+
+    // Subscribers info
     int subscribersNumber;
     Subscriber subscribers[MAX_SUBS];
 
+    // Queue base structure
     Message *tail;
     Message *head;
 } TQueue;
+
+
+// -= Interfaces (I) =-
 
 void createQueueI(TQueue *queue, int size) {
     pthread_mutex_init(&queue->mutex, NULL);
@@ -43,6 +55,10 @@ void createQueueI(TQueue *queue, int size) {
     queue->tail = NULL;
     queue->msgMax = size;
     queue->msgNumber = 0;
+    queue->exitFlag = false;
+    queue->exitMode = 0;
+    queue->activePublishers = 0;
+    queue->activeSubscribers = 0;
 
     // Empty subscribers list
     queue->subscribersNumber = 0;
@@ -54,20 +70,43 @@ void createQueueI(TQueue *queue, int size) {
 
 void destroyQueueI(TQueue *queue) {
     pthread_mutex_lock(&queue->mutex);
-    Message *tmp = queue->head;
+    printf("[D] - Preparation for destroying queue\n");
+
+    queue->exitFlag = true;
+    // Wait for all "waiting on condition" threads
+    // 1. publishers
+    queue->exitMode = 1;
+    while (queue->activePublishers != 0) {
+        pthread_cond_broadcast(&queue->msgPutCall);
+        pthread_cond_wait(&queue->msgPutCall, &queue->mutex);
+    }
+    printf("[D] - Removed all waiting publishers\n");
+
+    // 2. subscribers
+    queue->exitMode = 2;
+    while (queue->activeSubscribers != 0) {
+        pthread_cond_broadcast(&queue->msgGetCall);
+        pthread_cond_wait(&queue->msgGetCall, &queue->mutex);
+    }
+    printf("[D] - Removed all waiting subscribers\n");
 
     // Clear all Messages structures
+    Message *tmp = queue->head;
     while (tmp != NULL) {
         queue->head = tmp->next;
         free(tmp);
         tmp = queue->head;        
     }
 
-    pthread_mutex_unlock(&queue->mutex);
-    pthread_mutex_destroy(&queue->mutex);
+    pthread_mutex_t *copy = &queue->mutex;
+    free(queue);
+    // pthread_mutex_unlock(&queue->mutex);
+    // pthread_mutex_destroy(&queue->mutex);
+    pthread_mutex_unlock(copy);
+    pthread_mutex_destroy(copy);
 
     // Clear rest of the TQueue structure
-    free(queue);
+    printf("[D] - Queue destroyed\n");
 }
 
 bool subscribeI(TQueue *queue, pthread_t thread) {
@@ -141,30 +180,52 @@ void unsubscribeI(TQueue *queue, pthread_t thread) {
     pthread_mutex_unlock(&queue->mutex);
 }
 
-void putI(TQueue *queue, void *msg) {
+int putI(TQueue *queue, void *msg) {  
     pthread_mutex_lock(&queue->mutex);
+    if (queue->exitFlag) {
+        int exitMode = queue->exitMode;
+        pthread_mutex_unlock(&queue->mutex);
+
+        if (exitMode == 1)
+            pthread_cond_broadcast(&queue->msgPutCall);
+        else if (exitMode == 2)
+            pthread_cond_broadcast(&queue->msgGetCall);
+
+        return -1;
+    }
+
+    queue->activePublishers += 1;
 
     // Check if there is needed space in queue
     while (queue->msgNumber == queue->msgMax) {
         printf("[P] - Queue full | Waiting for free space\n");
         pthread_cond_wait(&queue->msgPutCall, &queue->mutex);
+
+        if (queue->exitFlag) {
+            queue->activePublishers -= 1;
+            pthread_mutex_unlock(&queue->mutex);
+            pthread_cond_broadcast(&queue->msgPutCall);
+            return -1;
+        }
     }
 
     // Create new Message
     Message *newMessage = malloc(sizeof(Message));
     if (newMessage == NULL) {
         printf("[P] - Failed to allocate memory for new message | Message not added \n");
+        queue->activePublishers -= 1;
         pthread_mutex_unlock(&queue->mutex);
         pthread_cond_broadcast(&queue->msgGetCall);
-        return;
+        return 0;
     }
 
     if (queue->subscribersNumber == 0) {
         printf("[P] - Zero subscribers | Removing message\n");
         free(newMessage);
+        queue->activePublishers -= 1;
         pthread_mutex_unlock(&queue->mutex);
         pthread_cond_broadcast(&queue->msgGetCall);
-        return;
+        return 0;
     }
 
     // Preparing new Message 'object'
@@ -193,12 +254,25 @@ void putI(TQueue *queue, void *msg) {
     }
 
     printf("[P] - Added new message\n");
+    queue->activePublishers -= 1;
     pthread_mutex_unlock(&queue->mutex);
     pthread_cond_broadcast(&queue->msgGetCall);
 }
 
 void *getI(TQueue *queue, pthread_t thread) {
     pthread_mutex_lock(&queue->mutex);
+    if (queue->exitFlag) {
+        int exitMode = queue->exitMode;
+        pthread_mutex_unlock(&queue->mutex);
+        if (exitMode == 1)
+            pthread_cond_broadcast(&queue->msgPutCall);
+        else if (exitMode == 2)
+            pthread_cond_broadcast(&queue->msgGetCall);
+        
+        return NULL;
+    }
+
+    queue->activeSubscribers += 1;
 
     // TODO: Change it for something faster like hashmap
     // Find threadId in subscribers list
@@ -211,6 +285,7 @@ void *getI(TQueue *queue, pthread_t thread) {
     }
     
     if (threadSubId == -1) {
+        queue->activeSubscribers -= 1;
         pthread_mutex_unlock(&queue->mutex);
         printf("[S] - Thread is no longer subscribed | Returning NULL\n");
         return NULL;
@@ -223,8 +298,16 @@ void *getI(TQueue *queue, pthread_t thread) {
         printf("[S] - All messages readed | Waiting for new one\n");
         pthread_cond_wait(&queue->msgGetCall, &queue->mutex);
         
+        if (queue->exitFlag) {
+            queue->activeSubscribers -= 1;
+            pthread_mutex_unlock(&queue->mutex);
+            pthread_cond_broadcast(&queue->msgGetCall);
+            return NULL;
+        }
+
         // Check if its still subscribed
         if (queue->subscribers[threadSubId].threadId != thread) {
+            queue->activeSubscribers -= 1;
             pthread_mutex_unlock(&queue->mutex);
             printf("[S] - Thread is no longer subscribed | Returning NULL\n");
             return NULL;
@@ -255,6 +338,7 @@ void *getI(TQueue *queue, pthread_t thread) {
                 // tmp->msg = NULL;
                 free(tmp);
              }
+             queue->activeSubscribers -= 1;
              pthread_mutex_unlock(&queue->mutex);
              pthread_cond_broadcast(&queue->msgPutCall);
              return msg;
@@ -262,11 +346,17 @@ void *getI(TQueue *queue, pthread_t thread) {
         tmp = tmp->next;
     }
 
+    // Secure exit - shouldn't be necessary
+    queue->activeSubscribers -= 1;
     pthread_mutex_unlock(&queue->mutex);
     pthread_cond_broadcast(&queue->msgPutCall);
 }
 
 int getAvailableI(TQueue *queue, pthread_t thread) {
+    if (queue == NULL) {
+        return 0;
+    }
+
     pthread_mutex_lock(&queue->mutex);
     Message *nextThreadMsg;
 
@@ -308,7 +398,7 @@ void removeI(TQueue *queue, void *msg) {
     // (0)
     if (queue->head == NULL || queue->tail == NULL) {
         pthread_mutex_unlock(&queue->mutex);
-        printf("[R] - Message for remove not found\n");
+        printf("[U] - Message for remove not found\n");
         return;
     }
 
@@ -412,9 +502,12 @@ void setSizeI(TQueue *queue, int size) {
         queue->msgMax = size;
     }
 
-    printf("[R] - Changed size of queue\n");
+    printf("[U] - Changed size of queue\n");
     pthread_mutex_unlock(&queue->mutex);
 }
+
+
+// -= Worker functions =-
 
 void *subscriber(void *q) {
     TQueue *queue = (TQueue*)q;
@@ -424,8 +517,8 @@ void *subscriber(void *q) {
     int *newMsg;
 
     while (true) {
-        available = getAvailableI(queue, thread);
-        printf("[S] - Available messages for thread: %d\n", available);
+        // available = getAvailableI(queue, thread);
+        // printf("[S] - Available messages for thread: %d\n", available);
 
         newMsg = getI(queue, thread);
         if (newMsg == NULL) {
@@ -436,6 +529,7 @@ void *subscriber(void *q) {
         }
         // sleep(1);
     }
+    printf("[S] - End of work\n");
 }
 
 void *publisher(void *q) {
@@ -446,9 +540,12 @@ void *publisher(void *q) {
         if (i==9) i=0;
         else i++;
 
-        putI(queue, &i);
+        if (putI(queue, &i) == -1) {
+            break;
+        }
         // sleep(1);
     }
+    printf("[P] - End of work\n");
 }
 
 void *remover(void *q) {
@@ -477,13 +574,13 @@ int main() {
 
     pthread_create(&pub1, NULL, publisher, queue);
     pthread_create(&pub2, NULL, publisher, queue);
-    // pthread_create(&pub3, NULL, publisher, queue);
+    pthread_create(&pub3, NULL, publisher, queue);
     pthread_create(&sub1, NULL, subscriber, queue);
     pthread_create(&sub2, NULL, subscriber, queue);
     pthread_create(&sub3, NULL, subscriber, queue);
-    // pthread_create(&sub4, NULL, subscriber, queue);
-    // pthread_create(&sub5, NULL, subscriber, queue);
-    // pthread_create(&sub6, NULL, subscriber, queue);
+    pthread_create(&sub4, NULL, subscriber, queue);
+    pthread_create(&sub5, NULL, subscriber, queue);
+    pthread_create(&sub6, NULL, subscriber, queue);
     // pthread_create(&rem1, NULL, remover, queue);
     
 
@@ -498,20 +595,21 @@ int main() {
     // sleep(5);
     // pthread_create(&sub4, NULL, subscriber, queue);
 
-    // sleep(3);
-    // setSizeI(queue, 2);
+    // sleep(30);
+    // setSizeI(queue, 5);
     
-    // destroyQueueI(queue);
+    sleep(10);
+    destroyQueueI(queue);
 
     pthread_join(pub1, NULL);
     pthread_join(pub2, NULL);
-    // pthread_join(pub3, NULL);
+    pthread_join(pub3, NULL);
     pthread_join(sub1, NULL);
     pthread_join(sub2, NULL);
     pthread_join(sub3, NULL);
     pthread_join(sub4, NULL);
-    // pthread_join(sub5, NULL);
-    // pthread_join(sub6, NULL);
+    pthread_join(sub5, NULL);
+    pthread_join(sub6, NULL);
     // pthread_join(rem1, NULL);
 
     return 0;
