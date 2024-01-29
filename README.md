@@ -58,6 +58,11 @@ Queue structure is based on FIFO linked list.
 | `Message*` | head | head of the queue |
 
 ## Other informations
+### Subscribers array
+Size of array is predefined with fixed value, which is in `structures.c` with name `MAX_SUBS`.
+
+Default value is `50`.
+
 ### Supportive functions
 In order to test the queue there are three supportive functions:
 - [**publisher**] - which defines thread in role of publisher
