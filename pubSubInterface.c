@@ -9,7 +9,7 @@
 #include "structures.h"
 
 
-// -= Interfaces (I) =-
+// -= Interfaces =-
 void createQueueI(TQueue *queue, int size) {
     pthread_mutex_init(&queue->mutex, NULL);
     pthread_cond_init(&queue->msgGetCall, NULL);
@@ -30,6 +30,8 @@ void createQueueI(TQueue *queue, int size) {
         queue->subscribers[i].threadId = -1;
         queue->subscribers[i].nextMsg = NULL;
     }
+
+    printf("[Q] - Queue initialized\n");
 }
 
 void destroyQueueI(TQueue *queue) {
@@ -38,6 +40,7 @@ void destroyQueueI(TQueue *queue) {
 
     queue->exitFlag = true;
     // Wait for all "waiting on condition" threads
+    // Using repetitive calls while normal putI & getI methods pass
     // 1. publishers
     queue->exitMode = 1;
     while (queue->activePublishers != 0) {
@@ -62,14 +65,12 @@ void destroyQueueI(TQueue *queue) {
         tmp = queue->head;        
     }
 
+    // Clear rest of the TQueue structure
     pthread_mutex_t *copy = &queue->mutex;
     free(queue);
-    // pthread_mutex_unlock(&queue->mutex);
-    // pthread_mutex_destroy(&queue->mutex);
     pthread_mutex_unlock(copy);
     pthread_mutex_destroy(copy);
 
-    // Clear rest of the TQueue structure
     printf("[D] - Queue destroyed\n");
 }
 
@@ -86,6 +87,7 @@ bool subscribeI(TQueue *queue, pthread_t thread) {
         }
     }
     pthread_mutex_unlock(&queue->mutex);
+    printf("[S] - Thread failed while subscribing to queue\n");
     return false;
 }
 
@@ -93,7 +95,6 @@ void unsubscribeI(TQueue *queue, pthread_t thread) {
     pthread_mutex_lock(&queue->mutex);
     Message *threadNextMsg;
 
-    // TODO: Change it for something faster like hashmap
     for (int i = 0; i < MAX_SUBS; i++) {
         if (queue->subscribers[i].threadId == thread) {
             queue->subscribersNumber -= 1;
@@ -126,7 +127,7 @@ void unsubscribeI(TQueue *queue, pthread_t thread) {
 
             // Check if there is Message with no receivers
             if (tmp->receivers == 0) {
-                printf("[S] - Found empty message | Deleting message\n");
+                printf("[U] - Found empty message | Deleting message\n");
                 queue->msgNumber -= 1;
                 if (queue->head == queue->tail) {
                     queue->tail = tmp->next;
@@ -144,8 +145,10 @@ void unsubscribeI(TQueue *queue, pthread_t thread) {
     pthread_mutex_unlock(&queue->mutex);
 }
 
-int putI(TQueue *queue, void *msg) {  
+// Normally returning 0, if error occurs returning -1 (error includes destroying queue)
+int putI(TQueue *queue, void *msg) { 
     pthread_mutex_lock(&queue->mutex);
+    // Notice queue destroy procedure and its status (mode)
     if (queue->exitFlag) {
         int exitMode = queue->exitMode;
         pthread_mutex_unlock(&queue->mutex);
@@ -184,7 +187,7 @@ int putI(TQueue *queue, void *msg) {
     }
 
     if (queue->subscribersNumber == 0) {
-        printf("[P] - Zero subscribers | Removing message\n");
+        printf("[U] - Zero subscribers | Removing message\n");
         free(newMessage);
         queue->activePublishers -= 1;
         pthread_mutex_unlock(&queue->mutex);
@@ -223,8 +226,10 @@ int putI(TQueue *queue, void *msg) {
     pthread_cond_broadcast(&queue->msgGetCall);
 }
 
+// Returns pointer to message, if error occurs returning NULL (error includes destroying queue)
 void *getI(TQueue *queue, pthread_t thread) {
     pthread_mutex_lock(&queue->mutex);
+    // Notice queue destroy procedure and its status (mode)
     if (queue->exitFlag) {
         int exitMode = queue->exitMode;
         pthread_mutex_unlock(&queue->mutex);
@@ -238,7 +243,6 @@ void *getI(TQueue *queue, pthread_t thread) {
 
     queue->activeSubscribers += 1;
 
-    // TODO: Change it for something faster like hashmap
     // Find threadId in subscribers list
     int threadSubId = -1; // -1 marks that thread is not in subscribers list
     for (int i = 0; i < MAX_SUBS; i++) {
@@ -292,7 +296,7 @@ void *getI(TQueue *queue, pthread_t thread) {
 
              // If its last read of message - delete it
              if (tmp->receivers == 0) {
-                printf("[S] - Message was read by the last subscriber | Deleting message\n");
+                printf("[U] - Message was read by the last subscriber | Deleting message\n");
                 queue->msgNumber -= 1;
 
                 if (queue->head == queue->tail) {
@@ -317,14 +321,9 @@ void *getI(TQueue *queue, pthread_t thread) {
 }
 
 int getAvailableI(TQueue *queue, pthread_t thread) {
-    if (queue == NULL) {
-        return 0;
-    }
-
     pthread_mutex_lock(&queue->mutex);
-    Message *nextThreadMsg;
 
-    // TODO: Change it for something faster like hashmap
+    Message *nextThreadMsg;
     // Find thread next unread message in subscribers list
     bool isSubscriberFound = false;
     for (int i = 0; i < MAX_SUBS; i++) {
@@ -362,7 +361,7 @@ void removeI(TQueue *queue, void *msg) {
     // (0)
     if (queue->head == NULL || queue->tail == NULL) {
         pthread_mutex_unlock(&queue->mutex);
-        printf("[U] - Message for remove not found\n");
+        printf("[R] - Message for remove not found\n");
         return;
     }
 

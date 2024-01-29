@@ -20,59 +20,54 @@ int getAvailableI(TQueue *queue, pthread_t thread);
 void removeI(TQueue *queue, void *msg);
 void setSizeI(TQueue *queue, int size);
 
-
 // -= Worker functions =-
 void *subscriber(void *q) {
     TQueue *queue = (TQueue*)q;
     pthread_t thread = ((pthread_t)pthread_self());
-    subscribeI(queue, thread);
+    if (!subscribeI(queue, thread)) return NULL;
+
     int available;
     int *newMsg;
-
     while (true) {
         available = getAvailableI(queue, thread);
         printf("[S] - Available messages for thread: %d\n", available);
 
         newMsg = getI(queue, thread);
         if (newMsg == NULL) {
-            printf("[S] - Thread is not subscribed\n");
+            printf("[S] - Thread is not subscribed or queue has been destroyed\n");
             break;
         } else {
             printf("[S] - New message received: %d\n", *newMsg);
         }
-        // sleep(1);
+
+        sleep(1);
     }
     printf("[S] - End of work\n");
 }
 
 void *publisher(void *q) {
     TQueue *queue = (TQueue*)q;
+
     int i = 0;
     while (true) {
         if (i==9) i=0;
         else i++;
 
-        if (putI(queue, &i) == -1) {
+        if (putI(queue, &i) == -1)
             break;
-        }
-        // sleep(1);
+
+        sleep(1);
     }
     printf("[P] - End of work\n");
 }
 
 void *remover(void *q) {
     TQueue *queue = (TQueue*)q;
-    int i = 0;
-    while (true) {
-        if (i==9) i=0;
-        else i++;
+    int msg = 123;
 
-        putI(queue, &i);
-        // sleep(1);
-
-        if (i == 4 || i == 7)
-            removeI(queue, &i);
-    }
+    putI(queue, &msg);
+    sleep(2);
+    removeI(queue, &msg);
 }
 
 int main() {
