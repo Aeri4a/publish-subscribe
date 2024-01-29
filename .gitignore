@@ -1,8 +1,13 @@
 # IGNORE ALL
 *
 
-# EXCEPT
+# ---- EXCEPT ----
+# Main files
 !.gitignore
 !main.c
+!pubSubInterface.c
+!structures.h
+
+# Temporary files
 !main_sync.c
 !main_sync2.c
