@@ -30,7 +30,7 @@ Object, which represents single added message.
 It acts like node in linked list.
 | Type | Name | Purpose |
 | ------- | ------- | ------- |
-| `int` | reveivers | number of subscribers who have not read the message |
+| `int` | receivers | number of subscribers who have not read the message |
 | `void*` | msg | pointer to message |
 | `Message*` | next | pointer to next Message object |
 ### Subscriber
