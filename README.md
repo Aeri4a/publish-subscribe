@@ -30,11 +30,11 @@ Object, which represents single added message.
 It acts like node in linked list.
 | Type | Name | Purpose |
 | ------- | ------- | ------- |
-| `int` | reveivers | number of subscribers who have not read the message |
+| `int` | receivers | number of subscribers who have not read the message |
 | `void*` | msg | pointer to message |
 | `Message*` | next | pointer to next Message object |
 ### Subscriber
-Representation of subscribead thread.
+Representation of subscribed thread.
 | Type | Name | Purpose |
 | ------- | ------- | ------- |
 | `pthread_t` | threadId | id of subscribed thread |
@@ -83,7 +83,7 @@ In order to test the queue there are three supportive functions:
 File main.c includes two test cases.
 In order to run them they need to be uncommented.
 
-**Tests are not independent, there should be just one uncommented at the same time**
+**Tests are not independent, there should be just one uncommented at the same time.**
 
 ### Other informations
 Based on task description, assumed that only get and put methods can react on destroyQueue.
