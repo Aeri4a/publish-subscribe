@@ -146,7 +146,7 @@ void unsubscribeI(TQueue *queue, pthread_t thread) {
 }
 
 // Normally returning 0, if error occurs returning -1 (error includes destroying queue)
-int putI(TQueue *queue, void *msg) { 
+int putI(TQueue *queue, void *msg) {
     pthread_mutex_lock(&queue->mutex);
     // Notice queue destroy procedure and its status (mode)
     if (queue->exitFlag) {
@@ -224,6 +224,7 @@ int putI(TQueue *queue, void *msg) {
     queue->activePublishers -= 1;
     pthread_mutex_unlock(&queue->mutex);
     pthread_cond_broadcast(&queue->msgGetCall);
+    return 0;
 }
 
 // Returns pointer to message, if error occurs returning NULL (error includes destroying queue)
@@ -318,6 +319,7 @@ void *getI(TQueue *queue, pthread_t thread) {
     queue->activeSubscribers -= 1;
     pthread_mutex_unlock(&queue->mutex);
     pthread_cond_broadcast(&queue->msgPutCall);
+    return NULL;
 }
 
 int getAvailableI(TQueue *queue, pthread_t thread) {

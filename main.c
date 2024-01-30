@@ -43,6 +43,7 @@ void *subscriber(void *q) {
         sleep(1);
     }
     printf("[S] - End of work\n");
+    return NULL;
 }
 
 void *publisher(void *q) {
@@ -59,6 +60,7 @@ void *publisher(void *q) {
         sleep(1);
     }
     printf("[P] - End of work\n");
+    return NULL;
 }
 
 void *remover(void *q) {
@@ -68,6 +70,7 @@ void *remover(void *q) {
     putI(queue, &msg);
     sleep(2);
     removeI(queue, &msg);
+    return NULL;
 }
 
 int main() {
